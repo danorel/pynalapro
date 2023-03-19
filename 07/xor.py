@@ -1,23 +1,26 @@
 import itertools
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
 
-from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 from torch import nn
 
-X = np.array([
+X_train = np.array([
     [0, 1],
     [1, 1],
-    [0, 0],
     [1, 0],
-    [0, 1]
+    [1, 1],
+    [0, 0],
+    [1, 0]
 ], dtype=np.float32)
+y_train = np.array([1, 0, 1, 0, 0, 1], dtype=np.float32)
 
-y = np.array([1, 0, 0, 1, 1], dtype=np.float32)
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=26)
+X_test = np.array([
+    [0, 0],
+    [1, 0]
+], dtype=np.float32)
+y_test = np.array([0, 1], dtype=np.float32)
 
 
 class XORData(Dataset):
@@ -32,13 +35,26 @@ class XORData(Dataset):
         return self.X.shape[0]
 
 
-class XORNeuralNetwork(nn.Module):
+class XORLinear(nn.Module):
     def __init__(self):
-        super(XORNeuralNetwork, self).__init__()
-        self.layer = nn.Linear(in_features=1, out_features=1, bias=True)
+        super(XORLinear, self).__init__()
+        self.layer = nn.Linear(in_features=2, out_features=1, bias=True)
 
     def forward(self, x):
         return self.layer(x)
+
+
+class XORNonLinear(nn.Module):
+    def __init__(self):
+        super(XORNonLinear, self).__init__()
+        self.sequence = nn.Sequential(
+            nn.Linear(in_features=2, out_features=2, bias=True),
+            nn.Sigmoid(),
+            nn.Linear(in_features=2, out_features=1, bias=True)
+        )
+
+    def forward(self, x):
+        return self.sequence(x)
 
 
 batch_size = 1
@@ -51,44 +67,71 @@ test_data = XORData(X_test, y_test)
 test_dataloader = DataLoader(
     dataset=test_data, batch_size=batch_size, shuffle=True)
 
-input_dim = 1
-output_dim = 1
 
-model = XORNeuralNetwork()
+def train_model(model, verbose=False):
+    loss_fn = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.03)
 
-learning_rate = 0.1
-loss_fn = nn.BCELoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+    num_epochs = 1000
+    plot_every = 50
+    current_loss = 0
+    total_loss = []
 
-num_epochs = 10
-loss_values = []
+    for epoch in range(num_epochs + 1):
+        for X, y in train_dataloader:
+            # zero the parameter gradients
+            optimizer.zero_grad()
 
-for epoch in range(num_epochs):
-    for X, y in train_dataloader:
-        # zero the parameter gradients
-        optimizer.zero_grad()
+            # forward + backward + optimize
+            pred = model(X)
+            loss = loss_fn(pred, y.unsqueeze(-1))
+            current_loss += loss.item()
+            loss.backward()
 
-        # forward + backward + optimize
-        pred = model(X)
-        loss = loss_fn(pred, y.unsqueeze(-1))
-        loss_values.append(loss.item())
-        loss.backward()
-        optimizer.step()
+            optimizer.step()
 
-total = 0
-correct = 0
-y_pred = []
-y_test = []
+        if epoch % plot_every == 0:
+            total_loss.append(current_loss / plot_every)
+            current_loss = 0
 
-with torch.no_grad():
-    for X, y in test_dataloader:
-        outputs = model(X)
-        predicted = np.where(outputs < 0.5, 0, 1)
-        predicted = list(itertools.chain(*predicted))
-        y_pred.append(predicted)
-        y_test.append(y)
-        total += y.size(0)
-        correct += (predicted == y.numpy()).sum().item()
+        if epoch % 250 == 0:
+            print(f'Epoch: {epoch} completed')
 
-print(
-    f'Accuracy of the network on the 1 test instances: {100 * correct // total}%')
+    if verbose:
+        epochs = np.linspace(0, num_epochs, len(total_loss))
+        plt.plot(epochs, total_loss)
+        plt.xlabel("Epoch")
+        plt.ylabel('Loss')
+        plt.show()
+
+    return model
+
+
+def evaluate_model(model, verbose=False):
+    total = 0
+    correct = 0
+    y_pred = []
+    y_test = []
+
+    with torch.no_grad():
+        for X, y in test_dataloader:
+            outputs = model(X)
+            predicted = np.where(outputs < 0.5, 0, 1)
+            predicted = list(itertools.chain(*predicted))
+            y_pred.append(predicted)
+            y_test.append(y)
+            total += y.size(0)
+            correct += (predicted == y.numpy()).sum().item()
+
+    accuracy = 100 * correct // total
+
+    if verbose:
+        print("Printing results...")
+        print(f'Accuracy of the network: {accuracy}%')
+
+    return accuracy
+
+
+xor_nonlinear_model = XORNonLinear()
+xor_nonlinear_model = train_model(xor_nonlinear_model, verbose=True)
+accuracy = evaluate_model(xor_nonlinear_model, verbose=True)
